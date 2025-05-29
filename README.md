@@ -19,7 +19,7 @@
 ### Verify Your Download
 ```bash
 # SHA256 checksum verification (update with your actual checksum)
-echo "YOUR_SHA256_CHECKSUM_HERE  SecureAutomatedPurge-v1.0.0.iso" | sha256sum -c
+echo "1D7A7455FC410F7675A54242D1A41F5694824EC50AC9BF94240E687119E632A4  live-image-amd64.hybrid.iso" | sha256sum -c
 ```
 
 ---
