@@ -1,0 +1,29 @@
+
+# ISO files
+*.iso
+*.hybrid.iso
+live-image-*.iso
+
+# Build artifacts
+.build/
+chroot/
+binary/
+cache/
+config/
+
+# Logs
+*.log
+build.log
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
