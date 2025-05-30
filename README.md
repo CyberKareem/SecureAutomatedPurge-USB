@@ -70,7 +70,6 @@ Perfect for:
 - **NVMe drives**: Format with crypto erase (`--ses=2`) or block erase (`--ses=1`)
 - **SATA SSDs**: ATA Secure Erase with password protection
 - **HDDs**: NIST-compliant 3-pass overwrite with `shred`
-- **Unallocated space**: Detects and securely wipes hidden data areas
 
 ### 🚀 Safety Measures
 - USB drives automatically excluded
@@ -90,7 +89,7 @@ Perfect for:
 lsblk  # or: diskutil list (macOS)
 
 # Write ISO to USB (replace /dev/sdX with your USB device)
-sudo dd if=SecureAutomatedPurge-v1.0.0.iso of=/dev/sdX bs=4M status=progress conv=fsync
+sudo dd if=live-image-amd64.hybrid.iso of=/dev/sdX bs=4M status=progress conv=fsync
 ```
 
 #### Windows:
@@ -102,7 +101,7 @@ sudo dd if=SecureAutomatedPurge-v1.0.0.iso of=/dev/sdX bs=4M status=progress con
 ### Running the Utility
 
 1. **Insert USB** into target computer
-2. **Boot from USB** (may need to change boot order in BIOS/UEFI)
+2. **Boot from USB** (may need to change boot order in BIOS/UEFI and disable secure boot)
 3. **Wait for automatic startup** (system loads into RAM)
 4. **Review drive list** carefully
 5. **Type confirmation** exactly: `ERASE ALL DATA`
@@ -225,27 +224,9 @@ This utility implements **Purge-level** sanitization as defined in [NIST Special
 
 ---
 
-## 🚨 Limitations & Warnings
-
-### Known Limitations
-- **Frozen drives**: Some systems lock ATA security on boot
-- **Hidden areas**: HPA/DCO areas may require additional tools
-- **Bad blocks**: Reallocated sectors might retain data
-- **Wear leveling**: SSDs may have inaccessible spare blocks
-
-### When NOT to Use
-- ❌ Drives with classified data (use physical destruction)
-- ❌ Drives under warranty (voids warranty)
-- ❌ RAID arrays (remove from array first)
-- ❌ Systems with active encryption keys in TPM
-
----
-
 ## 🔗 Related Projects
 
 - [BitLocker Cryptographic Erase](https://github.com/CyberKareem/BitLocker-CryptoErase) - Windows-based crypto erase utility
-- [DBAN](https://dban.org/) - Classic boot-and-nuke utility
-- [nwipe](https://github.com/martijnvanbrummelen/nwipe) - Modern fork of DBAN
 
 ---
 
