@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Enable error handling but continue on errors
+# Enable error handling but continue on errors.
 set +e
 
 banner_start() {
