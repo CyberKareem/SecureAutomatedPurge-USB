@@ -5,7 +5,7 @@
 > **Author**: Abdullah Kareem  
 > **License**: [MIT License](./LICENSE)  
 > **Compliance**: NIST SP 800-88 Rev. 1 – Purge-Level Sanitization  
-> **Blog Post**: [Coming Soon](#)
+> **Blog Post**: https://medium.com/@cyberkareem/building-a-nist-compliant-boot-and-nuke-usb-tool-secure-automated-purge-1a87e1f73602
 
 ![GitHub release](https://img.shields.io/github/v/release/CyberKareem/SecureAutomatedPurge-USB)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
