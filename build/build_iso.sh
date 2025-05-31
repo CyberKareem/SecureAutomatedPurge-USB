@@ -34,7 +34,7 @@ echo -e "\n${YELLOW}Checking dependencies...${NC}"
 for tool in lb debootstrap xorriso mkisofs; do
     if ! command -v $tool &> /dev/null; then
         echo -e "${RED}Error: $tool is not installed${NC}"
-        echo "Run: apt install live-build debootstrap xorriso syslinux-utils mtools"
+        echo "Run: apt install live-build debootstrap xorriso syslinux-utils mtools mkisofs"
         exit 1
     fi
 done
