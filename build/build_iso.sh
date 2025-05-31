@@ -44,6 +44,11 @@ echo -e "\n${YELLOW}Creating build directory: ${BUILD_DIR}${NC}"
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+# ====== FIX: Clean BEFORE configuring ======
+# Clean any previous builds (though this is a new directory)
+echo -e "\n${YELLOW}Cleaning build environment...${NC}"
+lb clean --all 2>/dev/null || true
+
 # Configure live-build
 echo -e "\n${YELLOW}Configuring live-build...${NC}"
 lb config \
@@ -76,8 +81,13 @@ mkdir -p config/hooks/normal
 
 # Copy secure purge script
 echo -e "\n${YELLOW}Installing secure purge script...${NC}"
-cp "${REPO_DIR}/secure_purge.sh" config/includes.chroot/usr/local/bin/
-chmod +x config/includes.chroot/usr/local/bin/secure_purge.sh
+if [ -f "${REPO_DIR}/secure_purge.sh" ]; then
+    cp "${REPO_DIR}/secure_purge.sh" config/includes.chroot/usr/local/bin/
+    chmod +x config/includes.chroot/usr/local/bin/secure_purge.sh
+else
+    echo -e "${RED}Error: secure_purge.sh not found in ${REPO_DIR}${NC}"
+    exit 1
+fi
 
 # Create rc.local
 echo -e "\n${YELLOW}Creating rc.local...${NC}"
@@ -158,9 +168,7 @@ chmod +x config/hooks/normal/02-disable-services.chroot
 # Create log directory
 touch config/includes.chroot/var/log/purge_audit/.gitkeep
 
-# Clean any previous builds
-echo -e "\n${YELLOW}Cleaning previous builds...${NC}"
-lb clean --all
+# ====== REMOVED: lb clean --all from here ======
 
 # Build bootstrap
 echo -e "\n${YELLOW}Building bootstrap (this may take a while)...${NC}"
