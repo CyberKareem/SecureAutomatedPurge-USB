@@ -113,10 +113,7 @@ smartmontools
 util-linux
 pv
 dc3dd
-coreutils
-hexdump
-pciutils
-usbutils
+bsdmainutils
 EOF
 
 # Configure repositories
