@@ -16,7 +16,7 @@ EOF
 banner_process() {
 cat << EOF
 
---- Purging Disk: $1 ---
+--- Purging Disk: $1 --
 
 EOF
 }
