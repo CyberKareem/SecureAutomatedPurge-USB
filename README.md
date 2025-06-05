@@ -276,5 +276,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
 **Remember**: With great power comes great responsibility. Always verify you're purging the correct system!
 
+---
+
 <a href="https://www.buymeacoffee.com/cyberkareem" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
