@@ -278,6 +278,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 If this tool helps you, please consider starring the repository!
 
 [![Star History Chart](https://api.star-history.com/svg?repos=CyberKareem/SecureAutomatedPurge-USB&type=Date)](https://star-history.com/#CyberKareem/SecureAutomatedPurge-USB&Date)
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=CyberKareem/SecureAutomatedPurge-USB&type=Date)](https://www.star-history.com/#CyberKareem/SecureAutomatedPurge-USB&Date)
 <a href="https://www.buymeacoffee.com/cyberkareem" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 ---
