@@ -112,8 +112,13 @@ hdparm
 smartmontools
 util-linux
 pv
-dc3dd
-bsdmainutils
+coreutils
+pciutils
+usbutils
+bsdextrautils
+openssl
+perl
+dmidecode
 EOF
 
 # Configure repositories
