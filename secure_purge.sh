@@ -305,17 +305,17 @@ for dev in $VALID_DRIVES; do
             
             if echo "$NVME_INFO" | grep -q "Crypto Erase Supported.*0x1"; then
                 SUPPORTS_CRYPTO_FORMAT=true
-                echo "✓ Crypto erase via format supported"
+                echo "Crypto erase via format supported"
             fi
             
             if echo "$NVME_INFO" | grep -E "Block Erase Sanitize.*0x1|Crypto Erase Sanitize.*0x1|Overwrite Sanitize.*0x1" >/dev/null; then
                 SUPPORTS_SANITIZE=true
-                echo "✓ Sanitize operations supported"
+                echo "Sanitize operations supported"
             fi
             
             if echo "$NVME_INFO" | grep -q "Format NVM Supported.*0x1"; then
                 SUPPORTS_FORMAT=true
-                echo "✓ Format operations supported"
+                echo "Format operations supported"
             fi
             
             # Get namespace info
@@ -353,7 +353,7 @@ for dev in $VALID_DRIVES; do
                 # Try with namespace
                 if nvme format "$DEV_PATH" -n "$NSID" -s 2 -f 2>&1 | tee /tmp/nvme_out.log | grep -v "Invalid"; then
                     if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                        echo "✓ NVMe crypto erase format successful"
+                        echo "NVMe crypto erase format successful"
                         PURGE_SUCCESS=true
                     fi
                 fi
@@ -362,7 +362,7 @@ for dev in $VALID_DRIVES; do
                 if [ "$PURGE_SUCCESS" != true ]; then
                     if nvme format "$DEV_PATH" --namespace-id="$NSID" --ses=2 --force 2>&1 | tee /tmp/nvme_out.log | grep -v "Invalid"; then
                         if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                            echo "✓ NVMe crypto erase format successful (alt syntax)"
+                            echo "NVMe crypto erase format successful (alt syntax)"
                             PURGE_SUCCESS=true
                         fi
                     fi
@@ -372,7 +372,7 @@ for dev in $VALID_DRIVES; do
                 if [ "$PURGE_SUCCESS" != true ]; then
                     if nvme format "$DEV_PATH" -s 2 -f 2>&1 | tee /tmp/nvme_out.log | grep -v "Invalid"; then
                         if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                            echo "✓ NVMe crypto erase format successful (no namespace)"
+                            echo "NVMe crypto erase format successful (no namespace)"
                             PURGE_SUCCESS=true
                         fi
                     fi
@@ -387,7 +387,7 @@ for dev in $VALID_DRIVES; do
                 # Try with namespace
                 if nvme format "$DEV_PATH" -n "$NSID" -s 1 -f 2>&1 | tee /tmp/nvme_out.log | grep -v "Invalid"; then
                     if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                        echo "✓ NVMe user data erase format successful"
+                        echo "NVMe user data erase format successful"
                         PURGE_SUCCESS=true
                     fi
                 fi
@@ -396,7 +396,7 @@ for dev in $VALID_DRIVES; do
                 if [ "$PURGE_SUCCESS" != true ]; then
                     if nvme format "$DEV_PATH" -s 1 -f 2>&1 | tee /tmp/nvme_out.log | grep -v "Invalid"; then
                         if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                            echo "✓ NVMe user data erase format successful (no namespace)"
+                            echo "NVMe user data erase format successful (no namespace)"
                             PURGE_SUCCESS=true
                         fi
                     fi
@@ -448,8 +448,8 @@ for dev in $VALID_DRIVES; do
                 
                 if nvme format "$DEV_PATH" -n "$NSID" -s 0 -f 2>&1 | tee /tmp/nvme_out.log; then
                     if ! grep -q "Invalid\|Error\|failed" /tmp/nvme_out.log; then
-                        echo "✓ Basic format successful (data may be recoverable)"
-                        echo "⚠ WARNING: Basic format is not cryptographically secure"
+                        echo "Basic format successful (data may be recoverable)"
+                        echo "WARNING: Basic format is not cryptographically secure"
                         PURGE_SUCCESS=true
                     fi
                 fi
@@ -490,7 +490,7 @@ for dev in $VALID_DRIVES; do
                 
                 if [ ${PIPESTATUS[0]} -eq 0 ] || [ ${PIPESTATUS[1]} -eq 0 ]; then
                     echo "Software overwrite completed"
-                    echo "⚠ WARNING: This may not erase all data due to NVMe wear leveling"
+                    echo "WARNING: This may not erase all data due to NVMe wear leveling"
                     PURGE_SUCCESS=true
                 else
                     echo "ERROR: Software overwrite also failed"
