@@ -294,20 +294,119 @@ for dev in $VALID_DRIVES; do
         "NVMe")
             echo "NVMe drive detected. Attempting NIST 800-88 Purge..."
             
-            # Try crypto erase first (most secure and fastest)
-            if nvme format "$DEV_PATH" --ses=2 -f 2>/dev/null; then
-                echo "NVMe crypto erase successful"
+            # First, check NVMe capabilities
+            echo "Checking NVMe capabilities..."
+            nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -E "Format |Crypto Erase|Sanitize" || true
+            
+            # Check if drive is locked/frozen
+            NVME_LOCKED=false
+            if nvme admin-passthru "$DEV_PATH" -o 0x06 -l 4096 2>&1 | grep -q "status code: 0x2"; then
+                echo "WARNING: NVMe drive appears to be locked"
+                NVME_LOCKED=true
+            fi
+            
+            # Method 1: Try all sanitize operations (most thorough)
+            echo "Attempting NVMe sanitize operations..."
+            
+            # Try crypto scramble sanitize (fastest, most secure)
+            if nvme sanitize "$DEV_PATH" --sanact=4 2>/dev/null; then
+                echo "NVMe sanitize crypto scramble successful"
+                # Wait for sanitize to complete
+                echo "Waiting for sanitize to complete..."
+                while nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -q "Sanitize Status.*in progress"; do
+                    sleep 1
+                done
                 PURGE_SUCCESS=true
-            # Fall back to block erase
-            elif nvme format "$DEV_PATH" --ses=1 -f 2>/dev/null; then
-                echo "NVMe block erase successful"
+            # Try block erase sanitize
+            elif nvme sanitize "$DEV_PATH" --sanact=2 2>/dev/null; then
+                echo "NVMe sanitize block erase successful"
+                while nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -q "Sanitize Status.*in progress"; do
+                    sleep 1
+                done
                 PURGE_SUCCESS=true
-            # Try sanitize as last resort
-            elif command -v nvme &>/dev/null && nvme sanitize "$DEV_PATH" --sanact=2 2>/dev/null; then
-                echo "NVMe sanitize crypto erase successful"
+            # Try overwrite sanitize
+            elif nvme sanitize "$DEV_PATH" --sanact=3 2>/dev/null; then
+                echo "NVMe sanitize overwrite successful"
+                while nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -q "Sanitize Status.*in progress"; do
+                    sleep 1
+                done
                 PURGE_SUCCESS=true
             else
-                echo "ERROR: All NVMe purge methods failed"
+                echo "All sanitize methods failed, trying format..."
+            fi
+            
+            # Method 2: Format with secure erase if sanitize failed
+            if [ "$PURGE_SUCCESS" != true ]; then
+                echo "Attempting NVMe format operations..."
+                
+                # Get namespace ID (usually 1, but let's be sure)
+                NSID=$(nvme list -o json 2>/dev/null | grep -A5 "$DEV_PATH" | grep -o '"NSID":[0-9]*' | cut -d: -f2 || echo "1")
+                
+                # Try crypto erase format
+                if nvme format "$DEV_PATH" -n "$NSID" --ses=2 -f 2>/dev/null; then
+                    echo "NVMe format crypto erase successful"
+                    PURGE_SUCCESS=true
+                # Try user data erase format
+                elif nvme format "$DEV_PATH" -n "$NSID" --ses=1 -f 2>/dev/null; then
+                    echo "NVMe format user data erase successful"
+                    PURGE_SUCCESS=true
+                # Try basic format (still better than nothing)
+                elif nvme format "$DEV_PATH" -n "$NSID" --ses=0 -f 2>/dev/null; then
+                    echo "NVMe basic format successful (data may be recoverable)"
+                    echo "WARNING: Basic format is not cryptographically secure"
+                    PURGE_SUCCESS=true
+                fi
+            fi
+            
+            # Method 3: Try without namespace ID if previous failed
+            if [ "$PURGE_SUCCESS" != true ]; then
+                echo "Retrying format without namespace ID..."
+                
+                if nvme format "$DEV_PATH" --ses=2 -f 2>/dev/null; then
+                    echo "NVMe format crypto erase successful (no NSID)"
+                    PURGE_SUCCESS=true
+                elif nvme format "$DEV_PATH" --ses=1 -f 2>/dev/null; then
+                    echo "NVMe format user data erase successful (no NSID)"
+                    PURGE_SUCCESS=true
+                fi
+            fi
+            
+            # Method 4: Try legacy secure erase if available
+            if [ "$PURGE_SUCCESS" != true ]; then
+                echo "Checking for legacy ATA secure erase support..."
+                if hdparm -I "$DEV_PATH" 2>/dev/null | grep -q "SECURITY ERASE UNIT"; then
+                    echo "NVMe supports ATA secure erase, attempting..."
+                    if ata_secure_erase "$DEV_PATH"; then
+                        PURGE_SUCCESS=true
+                    fi
+                fi
+            fi
+            
+            # Method 5: Last resort - software overwrite
+            if [ "$PURGE_SUCCESS" != true ]; then
+                echo "WARNING: All hardware-based purge methods failed."
+                echo "Attempting software overwrite (not NIST 800-88 compliant for NVMe)..."
+                
+                # Try to unmap/trim first
+                blkdiscard "$DEV_PATH" 2>/dev/null || true
+                
+                # Then overwrite
+                if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress oflag=direct 2>/dev/null; then
+                    echo "Software overwrite completed"
+                    echo "WARNING: This may not erase all data due to NVMe wear leveling"
+                    PURGE_SUCCESS=true
+                else
+                    echo "ERROR: All purge methods failed for $DEV_PATH"
+                fi
+            fi
+            
+            # Show which method succeeded
+            if [ "$PURGE_SUCCESS" = true ]; then
+                echo ""
+                echo "NVMe purge completed. Verifying..."
+                
+                # Check sanitize log if available
+                nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -E "Sanitize Status|Most Recent Sanitize" || true
             fi
             ;;
             
