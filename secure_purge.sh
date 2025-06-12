@@ -291,317 +291,218 @@ for dev in $VALID_DRIVES; do
     PURGE_SUCCESS=false
     
     case "$TYPE" in
-        "NVMe")
+  "NVMe")
             echo "NVMe drive detected. Attempting NIST 800-88 Purge..."
             echo "=================================================="
             
-            # Ensure not in use
-            echo "Ensuring device is not in use..."
-            umount "$DEV_PATH"* 2>/dev/null || true
+            # Initialize status tracking
+            PURGE_SUCCESS=false
+            PURGE_METHOD=""
+            HARDWARE_PURGE_AVAILABLE=false
             
-            # Get controller and namespace info
-            CTRL_PATH="${DEV_PATH%n*}"
-            if [[ "$DEV_PATH" =~ nvme[0-9]+n([0-9]+) ]]; then
-                NSID="${BASH_REMATCH[1]}"
-            else
-                NSID="1"
+            # Check capabilities first
+            echo "Checking drive capabilities..."
+            SUPPORTS_FORMAT=$(nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -c "Format NVM Supported.*0x1" || echo "0")
+            SUPPORTS_CRYPTO=$(nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -c "Crypto Erase Supported.*0x1" || echo "0")
+            SUPPORTS_SANITIZE=$(nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -E "Sanitize.*0x1" | grep -v "No-Deallocate" | wc -l || echo "0")
+            
+            if [ "$SUPPORTS_FORMAT" -gt 0 ] || [ "$SUPPORTS_SANITIZE" -gt 0 ]; then
+                HARDWARE_PURGE_AVAILABLE=true
             fi
+            
+            # Get namespace info
+            CTRL_PATH="${DEV_PATH%n*}"
+            NSID="${DEV_PATH##*n}"
+            NSID="${NSID:-1}"
             
             echo "Controller: $CTRL_PATH"
             echo "Namespace: $NSID"
             echo ""
             
-            # Show detailed capabilities
-            echo "Drive Capabilities:"
-            echo "-------------------"
-            nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -E "Format NVM|Crypto Erase|Sanitize" | sed 's/^/  /' || echo "  Unable to read capabilities"
-            echo ""
-            
-            PURGE_SUCCESS=false
-            PURGE_METHOD=""
-            
-            # Method 1: Format with Crypto Erase (BEST)
-            echo "Method 1: Crypto Erase Format (Secure Erase Setting 2)"
-            echo "------------------------------------------------------"
-            
-            # Test 1a: Simple syntax
-            echo -n "  Test 1a - nvme format $DEV_PATH -s 2: "
-            OUTPUT=$(nvme format "$DEV_PATH" -s 2 2>&1)
-            if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                echo "SUCCESS!"
-                PURGE_SUCCESS=true
-                PURGE_METHOD="Crypto Erase Format"
-            else
-                echo "Failed"
-                echo "    Error: $OUTPUT" | head -1
-            fi
-            
-            # Test 1b: With force flag
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo -n "  Test 1b - nvme format $DEV_PATH -s 2 -f: "
-                OUTPUT=$(nvme format "$DEV_PATH" -s 2 -f 2>&1)
-                if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                    echo "SUCCESS!"
-                    PURGE_SUCCESS=true
-                    PURGE_METHOD="Crypto Erase Format (forced)"
-                else
-                    echo "Failed"
-                    echo "    Error: $OUTPUT" | head -1
-                fi
-            fi
-            
-            # Test 1c: With namespace ID
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo -n "  Test 1c - nvme format $DEV_PATH -n $NSID -s 2 -f: "
-                OUTPUT=$(nvme format "$DEV_PATH" -n "$NSID" -s 2 -f 2>&1)
-                if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                    echo "SUCCESS!"
-                    PURGE_SUCCESS=true
-                    PURGE_METHOD="Crypto Erase Format (with namespace)"
-                else
-                    echo "Failed"
-                    echo "    Error: $OUTPUT" | head -1
-                fi
-            fi
-            
-            # Test 1d: Using controller path
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo -n "  Test 1d - nvme format $CTRL_PATH -n $NSID -s 2 -f: "
-                OUTPUT=$(nvme format "$CTRL_PATH" -n "$NSID" -s 2 -f 2>&1)
-                if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                    echo "SUCCESS!"
-                    PURGE_SUCCESS=true
-                    PURGE_METHOD="Crypto Erase Format (via controller)"
-                else
-                    echo "Failed"
-                    echo "    Error: $OUTPUT" | head -1
-                fi
-            fi
-            
-            echo ""
-            
-            # Method 2: User Data Erase (GOOD)
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo "Method 2: User Data Erase Format (Secure Erase Setting 1)"
-                echo "---------------------------------------------------------"
+            # Method 1: Try hardware-based purge (NIST 800-88 compliant)
+            if [ "$HARDWARE_PURGE_AVAILABLE" = true ]; then
+                echo "Attempting hardware-based secure erase..."
                 
-                # Test 2a: Simple syntax
-                echo -n "  Test 2a - nvme format $DEV_PATH -s 1: "
-                OUTPUT=$(nvme format "$DEV_PATH" -s 1 2>&1)
-                if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                    echo "SUCCESS!"
+                # Remove force flag and redirect stdin to handle prompts
+                # Try crypto erase first (most secure)
+                echo "yes" | nvme format "$DEV_PATH" -s 2 2>&1 >/dev/null && {
+                    echo "  Crypto erase format successful"
                     PURGE_SUCCESS=true
-                    PURGE_METHOD="User Data Erase Format"
-                else
-                    echo "Failed"
-                    echo "    Error: $OUTPUT" | head -1
-                fi
+                    PURGE_METHOD="Hardware: Crypto Erase (NIST Compliant)"
+                }
                 
-                # Test 2b: With force and namespace
+                # Try user data erase if crypto failed
                 if [ "$PURGE_SUCCESS" != true ]; then
-                    echo -n "  Test 2b - nvme format $DEV_PATH -n $NSID -s 1 -f: "
-                    OUTPUT=$(nvme format "$DEV_PATH" -n "$NSID" -s 1 -f 2>&1)
-                    if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                        echo "SUCCESS!"
+                    echo "yes" | nvme format "$DEV_PATH" -s 1 2>&1 >/dev/null && {
+                        echo "  User data erase format successful"
                         PURGE_SUCCESS=true
-                        PURGE_METHOD="User Data Erase Format (with namespace)"
-                    else
-                        echo "Failed"
-                        echo "    Error: $OUTPUT" | head -1
-                    fi
+                        PURGE_METHOD="Hardware: User Data Erase (NIST Compliant)"
+                    }
                 fi
                 
-                echo ""
-            fi
-            
-            # Method 3: Sanitize Operations
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo "Method 3: Sanitize Operations"
-                echo "-----------------------------"
-                
-                # Check if sanitize is supported at all
-                SANITIZE_CAPS=$(nvme id-ctrl "$DEV_PATH" -H 2>/dev/null | grep -E "Sanitize.*Supported" || echo "none")
-                echo "  Sanitize support: $SANITIZE_CAPS"
-                
-                if echo "$SANITIZE_CAPS" | grep -q "0x1"; then
-                    # Test 3a: Block Erase Sanitize
-                    echo -n "  Test 3a - nvme sanitize $DEV_PATH -a 2: "
-                    OUTPUT=$(nvme sanitize "$DEV_PATH" -a 2 2>&1)
-                    if echo "$OUTPUT" | grep -qE "Success|Submitted|success"; then
-                        echo "INITIATED!"
-                        echo "  Waiting for sanitize to complete..."
+                # Try sanitize if format failed
+                if [ "$PURGE_SUCCESS" != true ] && [ "$SUPPORTS_SANITIZE" -gt 0 ]; then
+                    nvme sanitize "$DEV_PATH" -a 2 2>&1 >/dev/null && {
+                        echo "  Sanitize block erase initiated"
+                        # Wait for completion
                         for i in {1..30}; do
                             if ! nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -q "in progress"; then
                                 break
                             fi
-                            echo -n "."
                             sleep 1
                         done
-                        echo " Done!"
                         PURGE_SUCCESS=true
-                        PURGE_METHOD="Block Erase Sanitize"
-                    else
-                        echo "Failed"
-                        echo "    Error: $OUTPUT" | head -1
-                    fi
-                    
-                    # Test 3b: Crypto Erase Sanitize
-                    if [ "$PURGE_SUCCESS" != true ]; then
-                        echo -n "  Test 3b - nvme sanitize $DEV_PATH -a 4: "
-                        OUTPUT=$(nvme sanitize "$DEV_PATH" -a 4 2>&1)
-                        if echo "$OUTPUT" | grep -qE "Success|Submitted|success"; then
-                            echo "INITIATED!"
-                            PURGE_SUCCESS=true
-                            PURGE_METHOD="Crypto Erase Sanitize"
-                        else
-                            echo "Failed"
-                            echo "    Error: $OUTPUT" | head -1
-                        fi
-                    fi
-                else
-                    echo "  Sanitize not supported on this drive"
+                        PURGE_METHOD="Hardware: Sanitize Block Erase (NIST Compliant)"
+                    }
                 fi
-                
-                echo ""
             fi
             
-            # Method 4: Basic Format (WARNING)
+            # Check for specific error conditions
             if [ "$PURGE_SUCCESS" != true ]; then
-                echo "Method 4: Basic Format (No Secure Erase)"
-                echo "----------------------------------------"
-                echo "  WARNING: This does NOT securely erase data!"
-                
-                echo -n "  Test 4a - nvme format $DEV_PATH -s 0 -f: "
-                OUTPUT=$(nvme format "$DEV_PATH" -s 0 -f 2>&1)
-                if echo "$OUTPUT" | grep -qE "Success|success|SUCCESSFUL|Format NVM command success"; then
-                    echo "SUCCESS (but data may be recoverable)"
-                    PURGE_SUCCESS=true
-                    PURGE_METHOD="Basic Format (NOT SECURE)"
-                else
-                    echo "Failed"
-                    echo "    Error: $OUTPUT" | head -1
+                # Check if drive is locked
+                if dmesg | tail -50 | grep -qi "nvme.*locked\|nvme.*frozen\|security.*frozen"; then
+                    echo "    Drive appears to be locked by firmware/BIOS"
+                    echo "   Recommendation: Disable Secure Boot and TCG features in BIOS"
                 fi
                 
-                echo ""
+                # Check for invalid opcode errors
+                if nvme format "$DEV_PATH" -s 2 2>&1 | grep -q "Invalid Command Opcode"; then
+                    echo "    Controller doesn't support format command despite capabilities"
+                    echo "   This is likely a firmware limitation or security lock"
+                fi
             fi
             
-            # Method 5: Software Overwrite (LAST RESORT)
+            # Method 2: Software overwrite (NOT NIST compliant for SSDs)
             if [ "$PURGE_SUCCESS" != true ]; then
-                echo "Method 5: Software Overwrite"
-                echo "----------------------------"
-                echo "WARNING: This is NOT NIST 800-88 compliant for NVMe!"
-                echo "         Data may remain in unmapped blocks."
+                echo ""
+                echo "Hardware secure erase not available or failed."
+                echo "Falling back to software overwrite..."
+                echo "    WARNING: This is NOT NIST 800-88 compliant for SSDs/NVMe!"
                 echo ""
                 
-                # Check why hardware methods failed
-                echo "Checking why hardware methods failed..."
-                if dmesg | tail -50 | grep -i "nvme.*error\|nvme.*fail" | tail -5; then
+                # Get drive size
+                DRIVE_SIZE_BYTES=$(blockdev --getsize64 "$DEV_PATH" 2>/dev/null || echo "256060514304")
+                DRIVE_SIZE_GB=$((DRIVE_SIZE_BYTES / 1073741824))
+                
+                echo "Drive size: ${DRIVE_SIZE_GB}GB"
+                
+                # Ensure device is not mounted
+                umount "$DEV_PATH"* 2>/dev/null || true
+                
+                # Step 1: TRIM (best effort)
+                echo "Step 1: Attempting TRIM/discard..."
+                if command -v blkdiscard &>/dev/null; then
+                    blkdiscard -f "$DEV_PATH" 2>&1 || echo "  TRIM completed with warnings"
+                else
+                    echo "  blkdiscard not available, skipping TRIM"
+                fi
+                
+                # Step 2: Overwrite with random data
+                echo "Step 2: Overwriting with random data..."
+                echo "  Estimated time: $((DRIVE_SIZE_GB * 3 / 60)) minutes"
+                
+                START_TIME=$(date +%s)
+                
+                # Try different methods in order of preference
+                OVERWRITE_SUCCESS=false
+                
+                # Method A: OpenSSL (fastest)
+                if command -v openssl &>/dev/null && [ "$OVERWRITE_SUCCESS" != true ]; then
+                    echo "  Using OpenSSL AES-CTR stream..."
+                    if openssl enc -aes-256-ctr -nosalt \
+                        -pass pass:"$(head -c 32 /dev/urandom | base64)" \
+                        < /dev/zero 2>/dev/null | \
+                        dd of="$DEV_PATH" bs=1M status=progress oflag=direct 2>&1; then
+                        OVERWRITE_SUCCESS=true
+                    fi
+                fi
+                
+                # Method B: Direct urandom (slower but reliable)
+                if [ "$OVERWRITE_SUCCESS" != true ]; then
+                    echo "  Using /dev/urandom..."
+                    if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress oflag=direct 2>&1; then
+                        OVERWRITE_SUCCESS=true
+                    fi
+                fi
+                
+                # Method C: Zero overwrite (fastest, less secure)
+                if [ "$OVERWRITE_SUCCESS" != true ]; then
+                    echo "  Using zero overwrite..."
+                    if dd if=/dev/zero of="$DEV_PATH" bs=1M status=progress oflag=direct 2>&1; then
+                        OVERWRITE_SUCCESS=true
+                        echo "      Only zeros written - data may be recoverable"
+                    fi
+                fi
+                
+                END_TIME=$(date +%s)
+                DURATION=$((END_TIME - START_TIME))
+                
+                if [ "$OVERWRITE_SUCCESS" = true ]; then
                     echo ""
-                fi
-                
-                # Confirm before proceeding
-                echo ""
-                echo "All hardware-based secure erase methods have failed."
-                echo "Proceed with software overwrite? (y/N): "
-                read -t 30 -n 1 response || response="y"  # Auto-yes after 30 seconds
-                echo ""
-                
-                if [[ "$response" =~ ^[Yy]$ ]]; then
-                    # Get size
-                    DRIVE_SIZE_BYTES=$(blockdev --getsize64 "$DEV_PATH" 2>/dev/null || echo 0)
-                    DRIVE_SIZE_GB=$((DRIVE_SIZE_BYTES / 1073741824))
-                    echo "Drive size: ${DRIVE_SIZE_GB}GB"
-                    
-                    # TRIM first
-                    echo "Step 1: TRIM/Discard all blocks..."
-                    if command -v blkdiscard &>/dev/null; then
-                        blkdiscard -f -v "$DEV_PATH" 2>&1 || echo "  TRIM failed or not supported"
-                    else
-                        echo "  blkdiscard not available, skipping TRIM"
+                    echo "Software overwrite completed"
+                    if [ $DURATION -gt 0 ]; then
+                        AVG_SPEED=$((DRIVE_SIZE_BYTES / DURATION / 1048576))
+                        echo "Time taken: $((DURATION / 60))m $((DURATION % 60))s"
+                        echo "Average speed: ${AVG_SPEED} MB/s"
                     fi
-                    
-                    # Overwrite
-                    echo "Step 2: Overwriting with random data..."
-                    echo "  This will take approximately $((DRIVE_SIZE_GB / 60)) minutes"
-                    
-                    START_TIME=$(date +%s)
-                    
-                    if command -v openssl &>/dev/null && command -v pv &>/dev/null; then
-                        # Best method: OpenSSL + pv for progress
-                        openssl enc -aes-256-ctr -nosalt \
-                            -pass pass:"$(head -c 32 /dev/urandom | base64)" \
-                            < /dev/zero | \
-                            pv -petrabS "$DRIVE_SIZE_BYTES" | \
-                            dd of="$DEV_PATH" bs=1M oflag=direct 2>/dev/null
-                        
-                        if [ ${PIPESTATUS[2]} -eq 0 ]; then
-                            PURGE_SUCCESS=true
-                            PURGE_METHOD="Software Overwrite (OpenSSL)"
-                        fi
-                    elif command -v openssl &>/dev/null; then
-                        # Good method: OpenSSL with dd progress
-                        openssl enc -aes-256-ctr -nosalt \
-                            -pass pass:"$(head -c 32 /dev/urandom | base64)" \
-                            < /dev/zero | \
-                            dd of="$DEV_PATH" bs=1M status=progress oflag=direct 2>&1
-                        
-                        if [ ${PIPESTATUS[1]} -eq 0 ]; then
-                            PURGE_SUCCESS=true
-                            PURGE_METHOD="Software Overwrite (OpenSSL)"
-                        fi
-                    else
-                        # Basic method: urandom
-                        if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress oflag=direct 2>&1; then
-                            PURGE_SUCCESS=true
-                            PURGE_METHOD="Software Overwrite (urandom)"
-                        fi
-                    fi
-                    
-                    END_TIME=$(date +%s)
-                    DURATION=$((END_TIME - START_TIME))
-                    
-                    if [ "$PURGE_SUCCESS" = true ]; then
-                        echo ""
-                        echo "Overwrite completed in $((DURATION / 60))m $((DURATION % 60))s"
-                        echo "Average speed: $((DRIVE_SIZE_BYTES / DURATION / 1048576)) MB/s"
-                    fi
+                    PURGE_SUCCESS=true
+                    PURGE_METHOD="Software: Overwrite (NOT NIST Compliant for NVMe)"
                 else
-                    echo "Software overwrite cancelled."
+                    echo "ERROR: All overwrite methods failed"
                 fi
             fi
             
-            # Final Result
+            # Step 3: Verification
+            if [ "$PURGE_SUCCESS" = true ]; then
+                echo ""
+                echo "Performing basic verification..."
+                # Read first and last sectors
+                if dd if="$DEV_PATH" bs=512 count=1 2>/dev/null | od -A x -t x1z | head -2 | grep -q "00 00 00 00"; then
+                    echo "  First sector appears empty"
+                fi
+                LAST_SECTOR=$(($(blockdev --getsz "$DEV_PATH" 2>/dev/null || echo 1) - 1))
+                if dd if="$DEV_PATH" bs=512 count=1 skip=$LAST_SECTOR 2>/dev/null | od -A x -t x1z | head -2 | grep -q "00 00 00 00"; then
+                    echo "  Last sector appears empty"
+                fi
+            fi
+            
+            # Final Result and NIST Compliance Status
             echo ""
             echo "=========================================="
             if [ "$PURGE_SUCCESS" = true ]; then
-                echo "✓ NVMe PURGE SUCCESSFUL"
-                echo "  Method used: $PURGE_METHOD"
+                echo "  NVMe PURGE COMPLETED"
+                echo "  Method: $PURGE_METHOD"
                 
-                # Show sanitize log if available
-                if [[ "$PURGE_METHOD" == *"Sanitize"* ]]; then
-                    nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -E "Status|Recent" || true
+                # NIST 800-88 Compliance Check
+                if [[ "$PURGE_METHOD" == *"NIST Compliant"* ]]; then
+                    echo "    NIST 800-88 COMPLIANT"
+                else
+                    echo "      NOT NIST 800-88 COMPLIANT"
+                    echo "     Software overwrite on NVMe/SSD cannot guarantee"
+                    echo "     complete data removal due to:"
+                    echo "     - Wear leveling"
+                    echo "     - Over-provisioning"
+                    echo "     - Bad block management"
+                    echo "     - Controller caching"
                 fi
+                
+                # Mark as success for counter
+                ((PURGED_DRIVES++))
             else
-                echo "✗ NVMe PURGE FAILED"
+                echo "NVMe PURGE FAILED"
                 echo ""
-                echo "Troubleshooting:"
-                echo "1. Check BIOS/UEFI settings for:"
-                echo "   - NVMe security lock"
-                echo "   - TCG/OPAL settings"
-                echo "   - Secure boot (try disabling)"
-                echo ""
-                echo "2. Try these commands manually:"
-                echo "   nvme format $DEV_PATH -s 2"
-                echo "   nvme format $DEV_PATH -n $NSID -s 2 -f"
-                echo ""
-                echo "3. Check for firmware updates for:"
-                echo "   - NVMe drive"
-                echo "   - System BIOS"
-                echo ""
-                echo "4. Report issue with this info:"
-                nvme id-ctrl "$DEV_PATH" | grep -E "mn|fr|ver" || true
+                echo "This drive requires one of the following:"
+                echo "1. Disable Secure Boot and TCG features in BIOS"
+                echo "2. Use manufacturer's secure erase utility"
+                echo "3. Physical destruction of the drive"
+                
+                # Mark as failed for counter
+                ((FAILED_DRIVES++))
             fi
             echo "=========================================="
+            
+            # Log details for audit
+            echo "PURGE_LOG: $DEV_PATH | $MODEL | $SERIAL | $(date -u +%Y-%m-%dT%H:%M:%SZ) | $PURGE_METHOD | $PURGE_SUCCESS" >> /tmp/purge_audit.log
             ;;
             
         "SATA_SSD"|"SSD")
