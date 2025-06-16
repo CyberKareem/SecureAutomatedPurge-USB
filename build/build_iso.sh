@@ -120,6 +120,8 @@ nwipe
 sedutil
 gdisk
 parted
+blkdiscard
+sedutil
 EOF
 
 # Configure repositories
