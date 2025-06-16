@@ -112,13 +112,14 @@ hdparm
 smartmontools
 util-linux
 pv
-coreutils
-pciutils
-usbutils
-bsdextrautils
-openssl
-perl
-dmidecode
+dc3dd
+bsdmainutils
+blkdiscard
+secure-delete
+nwipe
+sedutil
+gdisk
+parted
 EOF
 
 # Configure repositories
