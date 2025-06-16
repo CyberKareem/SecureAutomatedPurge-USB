@@ -114,14 +114,13 @@ util-linux
 pv
 dc3dd
 bsdmainutils
-blkdiscard
 secure-delete
 nwipe
-sedutil
 gdisk
 parted
-blkdiscard
-sedutil
+coreutils
+dosfstools
+e2fsprogs
 EOF
 
 # Configure repositories
