@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Enable error handling but continue on errors.
+# Enable error handling but continue on errors
 set +e
 
 banner_start() {
@@ -60,6 +60,151 @@ unfreeze_drive() {
         echo "Drive $dev successfully unfrozen."
         return 0
     fi
+}
+
+# Function to detect problematic NVMe drives
+detect_problematic_nvme() {
+    local dev=$1
+    local model=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "Model Number" | cut -d: -f2- | xargs)
+    local fw=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "Firmware Revision" | cut -d: -f2- | xargs)
+    
+    # Known problematic drives
+    case "$model" in
+        *"MZVLW256HEHP"*|*"MZULW256HEHP"*)
+            echo "WARNING: Samsung OEM drive detected with known secure erase issues"
+            echo "Model: $model, Firmware: $fw"
+            return 0
+            ;;
+        *"PM981"*|*"PM991"*)
+            echo "WARNING: Samsung OEM drive detected that may reject secure erase"
+            echo "Model: $model, Firmware: $fw"
+            return 0
+            ;;
+    esac
+    
+    return 1
+}
+
+# Enhanced NVMe purge function with additional methods
+purge_nvme() {
+    local dev=$1
+    local success=false
+    
+    echo "Attempting NVMe purge for $dev..."
+    
+    # Get NVMe identify info
+    NVME_INFO=$(nvme id-ctrl "$dev" -H 2>/dev/null || echo "")
+    
+    # Method 1: Try standard format with crypto erase
+    echo "Method 1: Attempting crypto erase (SES=2)..."
+    if nvme format "$dev" --ses=2 -f 2>/dev/null; then
+        echo "SUCCESS: Crypto erase completed"
+        return 0
+    fi
+    
+    # Method 2: Try with namespace ID explicitly
+    echo "Method 2: Attempting with namespace ID..."
+    if nvme format "$dev" -n 1 --ses=2 -f 2>/dev/null; then
+        echo "SUCCESS: Crypto erase with namespace completed"
+        return 0
+    fi
+    
+    # Method 3: Try block erase
+    echo "Method 3: Attempting block erase (SES=1)..."
+    if nvme format "$dev" --ses=1 -f 2>/dev/null; then
+        echo "SUCCESS: Block erase completed"
+        return 0
+    fi
+    
+    # Method 4: Try sanitize operations
+    echo "Method 4: Attempting sanitize operations..."
+    # Check sanitize capabilities
+    SANITIZE_CAP=$(nvme sanitize-log "$dev" 2>/dev/null | grep -i "crypto erase support" || echo "")
+    
+    if [ -n "$SANITIZE_CAP" ]; then
+        # Try crypto scramble sanitize
+        if nvme sanitize "$dev" --sanact=4 2>/dev/null; then
+            echo "SUCCESS: Sanitize crypto scramble completed"
+            return 0
+        fi
+        
+        # Try block erase sanitize
+        if nvme sanitize "$dev" --sanact=2 2>/dev/null; then
+            echo "SUCCESS: Sanitize block erase completed"
+            return 0
+        fi
+        
+        # Try overwrite sanitize
+        if nvme sanitize "$dev" --sanact=3 2>/dev/null; then
+            echo "SUCCESS: Sanitize overwrite completed"
+            return 0
+        fi
+    fi
+    
+    # Method 5: Check for TCG Opal support and attempt PSID revert
+    echo "Method 5: Checking for TCG Opal/PSID support..."
+    if command -v sedutil-cli &>/dev/null; then
+        # This would need sedutil-cli installed
+        if sedutil-cli --scan 2>/dev/null | grep -q "$dev"; then
+            echo "TCG Opal support detected - manual PSID revert may be possible"
+            echo "WARNING: PSID revert requires physical access to drive label"
+        fi
+    fi
+    
+    # Method 6: Attempt to reset controller (risky, might help with locked states)
+    echo "Method 6: Attempting controller reset..."
+    if nvme reset "$dev" 2>/dev/null; then
+        sleep 2
+        # Retry format after reset
+        if nvme format "$dev" --ses=2 -f 2>/dev/null; then
+            echo "SUCCESS: Crypto erase after reset completed"
+            return 0
+        fi
+    fi
+    
+    # Method 7: Try namespace management (delete and recreate)
+    echo "Method 7: Attempting namespace management..."
+    # Get namespace ID
+    NSID=$(nvme list-ns "$dev" 2>/dev/null | grep -oE "^\[.*:.*\]" | grep -oE "[0-9]+" | head -1)
+    if [ -n "$NSID" ]; then
+        # Try to delete and recreate namespace
+        if nvme delete-ns "$dev" -n "$NSID" 2>/dev/null; then
+            echo "Namespace deleted, attempting recreation..."
+            # Get total size
+            SIZE=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "total nvm capacity" | grep -oE "[0-9]+" | head -1)
+            if [ -n "$SIZE" ] && nvme create-ns "$dev" -s "$SIZE" -c "$SIZE" 2>/dev/null; then
+                echo "SUCCESS: Namespace recreated"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Method 8: Software-based secure overwrite (last resort)
+    echo "WARNING: Hardware-based purge methods failed!"
+    echo "Method 8: Falling back to software overwrite..."
+    echo "Note: This is NOT cryptographically secure for all NVMe controllers"
+    
+    # First try blkdiscard for TRIM
+    if command -v blkdiscard &>/dev/null; then
+        echo "Issuing TRIM/discard to entire drive..."
+        blkdiscard -f "$dev" 2>/dev/null || true
+    fi
+    
+    # Then overwrite with random data
+    echo "Overwriting with random data (this will take time)..."
+    if dd if=/dev/urandom of="$dev" bs=1M status=progress conv=fdatasync 2>/dev/null; then
+        echo "Software overwrite completed"
+        
+        # Issue final TRIM
+        blkdiscard -f "$dev" 2>/dev/null || true
+        
+        echo "PARTIAL SUCCESS: Software overwrite completed"
+        echo "WARNING: Some data may remain in over-provisioned areas"
+        return 0
+    fi
+    
+    echo "ERROR: All purge methods failed for $dev"
+    return 1
 }
 
 # Function to perform ATA Secure Erase
@@ -197,9 +342,9 @@ fi
 # SAFETY CONFIRMATION
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "                   WARNING                 "
-echo "                                           "
-echo "   This will PERMANENTLY DESTROY ALL DATA  "
+echo "                    WARNING                 "
+echo "                                            "
+echo "    This will PERMANENTLY DESTROY ALL DATA  "
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
@@ -291,241 +436,21 @@ for dev in $VALID_DRIVES; do
     PURGE_SUCCESS=false
     
     case "$TYPE" in
-    "NVMe")
-            echo "NVMe drive detected. Attempting NIST 800-88 Purge..."
-            echo "=================================================="
+        "NVMe")
+            echo "NVMe drive detected. Checking drive model..."
             
-            # Basic info
-            CTRL_PATH="${DEV_PATH%n*}"
-            NSID="${DEV_PATH##*n}"
-            NSID="${NSID:-1}"
-            
-            echo "Controller: $CTRL_PATH"
-            echo "Namespace: $NSID"
-            echo "Device: $DEV_PATH"
-            echo ""
-            
-            PURGE_SUCCESS=false
-            PURGE_METHOD=""
-            
-            # Ensure not mounted
-            umount "$DEV_PATH"* 2>/dev/null || true
-            umount "${DEV_PATH}p"* 2>/dev/null || true
-            
-            echo "Trying all possible secure erase commands..."
-            echo "============================================"
-            
-            # Counter for attempts
-            ATTEMPT=0
-            
-            # Function to test a command
-            try_command() {
-                local cmd="$1"
-                local desc="$2"
-                ((ATTEMPT++))
-                
-                echo ""
-                echo "Attempt $ATTEMPT: $desc"
-                echo "Command: $cmd"
-                
-                # Run command with timeout and capture output
-                OUTPUT=$(timeout 10 bash -c "$cmd" 2>&1)
-                EXIT_CODE=$?
-                
-                # Check for success patterns
-                if echo "$OUTPUT" | grep -qiE "success|successful|complete|done|Format NVM command success|Format NVM: success"; then
-                    echo "  SUCCESS!"
-                    PURGE_SUCCESS=true
-                    PURGE_METHOD="$desc"
-                    return 0
-                elif echo "$OUTPUT" | grep -qiE "Invalid Command Opcode|Invalid Field|not supported"; then
-                    echo "  Not supported"
-                elif echo "$OUTPUT" | grep -qi "about to format\|will be lost"; then
-                    # Some commands ask for confirmation - auto-confirm
-                    echo "Retrying with auto-confirm..."
-                    echo "yes" | timeout 10 bash -c "$cmd" 2>&1
-                    if [ $? -eq 0 ]; then
-                        echo "  SUCCESS!"
-                        PURGE_SUCCESS=true
-                        PURGE_METHOD="$desc"
-                        return 0
-                    fi
-                else
-                    echo "  Failed: ${OUTPUT:0:80}..."
-                fi
-                
-                return 1
-            }
-            
-            # === FORMAT COMMANDS - CRYPTO ERASE (SES=2) ===
-            echo ""
-            echo "=== Testing Format with Crypto Erase (SES=2) ==="
-            
-            # Try all syntax variations for crypto erase
-            try_command "nvme format $DEV_PATH -s 2" "Format crypto erase (simple)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH --ses=2" "Format crypto erase (--ses)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -s 2 -f" "Format crypto erase (force)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH --ses=2 --force" "Format crypto erase (long opts)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -n $NSID -s 2" "Format crypto erase (with namespace)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -n $NSID -s 2 -f" "Format crypto erase (namespace + force)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH --namespace-id=$NSID --ses=2" "Format crypto erase (long namespace)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $CTRL_PATH -n $NSID -s 2" "Format crypto erase (controller path)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $CTRL_PATH -n $NSID -s 2 -f" "Format crypto erase (controller + force)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "echo yes | nvme format $DEV_PATH -s 2" "Format crypto erase (piped yes)"
-            [ "$PURGE_SUCCESS" != true ] && try_command "yes | nvme format $DEV_PATH -s 2" "Format crypto erase (yes command)"
-            
-            # === FORMAT COMMANDS - USER DATA ERASE (SES=1) ===
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo ""
-                echo "=== Testing Format with User Data Erase (SES=1) ==="
-                
-                try_command "nvme format $DEV_PATH -s 1" "Format user data erase (simple)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH --ses=1" "Format user data erase (--ses)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -s 1 -f" "Format user data erase (force)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -n $NSID -s 1" "Format user data erase (with namespace)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -n $NSID -s 1 -f" "Format user data erase (namespace + force)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $CTRL_PATH -n $NSID -s 1 -f" "Format user data erase (controller)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "echo yes | nvme format $DEV_PATH -s 1" "Format user data erase (piped yes)"
+            # Check if this is a known problematic drive
+            if detect_problematic_nvme "$DEV_PATH"; then
+                echo "This drive may reject standard secure erase commands."
+                echo "Attempting alternative methods..."
             fi
             
-            # === SANITIZE COMMANDS ===
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo ""
-                echo "=== Testing Sanitize Commands ==="
-                
-                # Crypto scramble (action 4)
-                try_command "nvme sanitize $DEV_PATH -a 4" "Sanitize crypto scramble (short)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH --sanact=4" "Sanitize crypto scramble (long)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $CTRL_PATH -a 4" "Sanitize crypto scramble (controller)"
-                
-                # Block erase (action 2)
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH -a 2" "Sanitize block erase (short)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH --sanact=2" "Sanitize block erase (long)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $CTRL_PATH -a 2" "Sanitize block erase (controller)"
-                
-                # Overwrite (action 3)
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH -a 3" "Sanitize overwrite (short)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH --sanact=3" "Sanitize overwrite (long)"
-                
-                # Exit failure mode (action 1) - sometimes needed first
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme sanitize $DEV_PATH -a 1" "Sanitize exit failure mode"
-                
-                # Check if sanitize started
-                if [ "$PURGE_SUCCESS" = true ] && [[ "$PURGE_METHOD" == *"Sanitize"* ]]; then
-                    echo "Waiting for sanitize to complete..."
-                    for i in {1..60}; do
-                        if ! nvme sanitize-log "$DEV_PATH" 2>/dev/null | grep -qi "in progress\|active"; then
-                            break
-                        fi
-                        echo -n "."
-                        sleep 1
-                    done
-                    echo " Done!"
-                fi
-            fi
-            
-            # === BASIC FORMAT (NO SECURE ERASE) ===
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo ""
-                echo "=== Testing Basic Format (SES=0) - Not Secure ==="
-                
-                try_command "nvme format $DEV_PATH -s 0 -f" "Basic format (not secure!)"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH --ses=0 --force" "Basic format long opts"
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme format $DEV_PATH -n $NSID -s 0 -f" "Basic format with namespace"
-            fi
-            
-            # === ALTERNATIVE APPROACHES ===
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo ""
-                echo "=== Testing Alternative Approaches ==="
-                
-                # Try write-zeroes (some drives support this)
-                try_command "nvme write-zeroes $DEV_PATH -s 0 -c 0xffffffff" "Write zeros command"
-                
-                # Try deallocate/TRIM
-                [ "$PURGE_SUCCESS" != true ] && try_command "nvme dsm $DEV_PATH -s 0 -b 0xffffffff -ad" "Deallocate command"
-                
-                # Try ATA secure erase if supported
-                if hdparm -I "$DEV_PATH" 2>&1 | grep -q "supported"; then
-                    echo ""
-                    echo "Trying ATA Secure Erase (some NVMe support this)..."
-                    hdparm --user-master u --security-set-pass p "$DEV_PATH" 2>&1
-                    if hdparm --user-master u --security-erase p "$DEV_PATH" 2>&1; then
-                        PURGE_SUCCESS=true
-                        PURGE_METHOD="ATA Secure Erase"
-                    fi
-                fi
-            fi
-            
-            # === SOFTWARE OVERWRITE (FALLBACK) ===
-            if [ "$PURGE_SUCCESS" != true ]; then
-                echo ""
-                echo "============================================"
-                echo "All hardware secure erase methods failed."
-                echo "Falling back to software overwrite..."
-                echo "   WARNING: NOT NIST 800-88 COMPLIANT for NVMe!"
-                echo ""
-                
-                # Get size
-                DRIVE_SIZE_BYTES=$(blockdev --getsize64 "$DEV_PATH" 2>/dev/null || echo "256060514304")
-                DRIVE_SIZE_GB=$((DRIVE_SIZE_BYTES / 1073741824))
-                echo "Drive size: ${DRIVE_SIZE_GB}GB"
-                
-                # TRIM first
-                echo "Step 1: TRIM/Discard..."
-                blkdiscard -f "$DEV_PATH" 2>&1 || echo "  TRIM completed or not supported"
-                
-                # Overwrite
-                echo "Step 2: Overwriting with random data..."
-                START_TIME=$(date +%s)
-                
-                # Simple direct overwrite
-                if command -v openssl &>/dev/null; then
-                    echo "Using OpenSSL for faster random data..."
-                    openssl enc -aes-256-ctr -nosalt \
-                        -pass pass:"$(date +%s)$RANDOM" \
-                        < /dev/zero | \
-                        dd of="$DEV_PATH" bs=4M iflag=fullblock oflag=direct status=progress 2>&1
-                    
-                    if [ ${PIPESTATUS[1]} -eq 0 ]; then
-                        PURGE_SUCCESS=true
-                        PURGE_METHOD="Software Overwrite (NOT NIST Compliant)"
-                    fi
-                else
-                    # Fallback to urandom
-                    if dd if=/dev/urandom of="$DEV_PATH" bs=4M oflag=direct status=progress 2>&1; then
-                        PURGE_SUCCESS=true
-                        PURGE_METHOD="Software Overwrite (NOT NIST Compliant)"
-                    fi
-                fi
-                
-                END_TIME=$(date +%s)
-                DURATION=$((END_TIME - START_TIME))
-                if [ $DURATION -gt 0 ]; then
-                    echo "Overwrite completed in $((DURATION / 60))m $((DURATION % 60))s"
-                fi
-            fi
-            
-            # === FINAL RESULT ===
-            echo ""
-            echo "============================================"
-            if [ "$PURGE_SUCCESS" = true ]; then
-                echo "  NVMe PURGE COMPLETED"
-                echo "  Method: $PURGE_METHOD"
-                
-                if [[ "$PURGE_METHOD" == *"NOT NIST Compliant"* ]] || [[ "$PURGE_METHOD" == *"not secure"* ]]; then
-                    echo "     NOT NIST 800-88 COMPLIANT"
-                else
-                    echo "    NIST 800-88 COMPLIANT"
-                fi
-                
-                ((PURGED_DRIVES++))
+            # Use enhanced purge function
+            if purge_nvme "$DEV_PATH"; then
+                PURGE_SUCCESS=true
             else
-                echo "  NVMe PURGE FAILED"
-                echo "  All $ATTEMPT methods attempted"
-                ((FAILED_DRIVES++))
+                echo "ERROR: All NVMe purge methods failed"
             fi
-            echo "============================================"
             ;;
             
         "SATA_SSD"|"SSD")
