@@ -121,6 +121,10 @@ parted
 coreutils
 dosfstools
 e2fsprogs
+dmidecode
+cryptsetup
+usbutils
+pciutils
 EOF
 
 # Configure repositories
