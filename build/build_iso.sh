@@ -113,7 +113,7 @@ smartmontools
 util-linux
 pv
 dc3dd
-bsdmainutils
+bsdextrautils
 secure-delete
 nwipe
 gdisk
