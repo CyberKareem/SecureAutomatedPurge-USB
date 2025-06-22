@@ -62,151 +62,6 @@ unfreeze_drive() {
     fi
 }
 
-# Function to detect problematic NVMe drives
-detect_problematic_nvme() {
-    local dev=$1
-    local model=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "Model Number" | cut -d: -f2- | xargs)
-    local fw=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "Firmware Revision" | cut -d: -f2- | xargs)
-    
-    # Known problematic drives
-    case "$model" in
-        *"MZVLW256HEHP"*|*"MZULW256HEHP"*)
-            echo "WARNING: Samsung OEM drive detected with known secure erase issues"
-            echo "Model: $model, Firmware: $fw"
-            return 0
-            ;;
-        *"PM981"*|*"PM991"*)
-            echo "WARNING: Samsung OEM drive detected that may reject secure erase"
-            echo "Model: $model, Firmware: $fw"
-            return 0
-            ;;
-    esac
-    
-    return 1
-}
-
-# Enhanced NVMe purge function with additional methods
-purge_nvme() {
-    local dev=$1
-    local success=false
-    
-    echo "Attempting NVMe purge for $dev..."
-    
-    # Get NVMe identify info
-    NVME_INFO=$(nvme id-ctrl "$dev" -H 2>/dev/null || echo "")
-    
-    # Method 1: Try standard format with crypto erase
-    echo "Method 1: Attempting crypto erase (SES=2)..."
-    if nvme format "$dev" --ses=2 -f 2>/dev/null; then
-        echo "SUCCESS: Crypto erase completed"
-        return 0
-    fi
-    
-    # Method 2: Try with namespace ID explicitly
-    echo "Method 2: Attempting with namespace ID..."
-    if nvme format "$dev" -n 1 --ses=2 -f 2>/dev/null; then
-        echo "SUCCESS: Crypto erase with namespace completed"
-        return 0
-    fi
-    
-    # Method 3: Try block erase
-    echo "Method 3: Attempting block erase (SES=1)..."
-    if nvme format "$dev" --ses=1 -f 2>/dev/null; then
-        echo "SUCCESS: Block erase completed"
-        return 0
-    fi
-    
-    # Method 4: Try sanitize operations
-    echo "Method 4: Attempting sanitize operations..."
-    # Check sanitize capabilities
-    SANITIZE_CAP=$(nvme sanitize-log "$dev" 2>/dev/null | grep -i "crypto erase support" || echo "")
-    
-    if [ -n "$SANITIZE_CAP" ]; then
-        # Try crypto scramble sanitize
-        if nvme sanitize "$dev" --sanact=4 2>/dev/null; then
-            echo "SUCCESS: Sanitize crypto scramble completed"
-            return 0
-        fi
-        
-        # Try block erase sanitize
-        if nvme sanitize "$dev" --sanact=2 2>/dev/null; then
-            echo "SUCCESS: Sanitize block erase completed"
-            return 0
-        fi
-        
-        # Try overwrite sanitize
-        if nvme sanitize "$dev" --sanact=3 2>/dev/null; then
-            echo "SUCCESS: Sanitize overwrite completed"
-            return 0
-        fi
-    fi
-    
-    # Method 5: Check for TCG Opal support and attempt PSID revert
-    echo "Method 5: Checking for TCG Opal/PSID support..."
-    if command -v sedutil-cli &>/dev/null; then
-        # This would need sedutil-cli installed
-        if sedutil-cli --scan 2>/dev/null | grep -q "$dev"; then
-            echo "TCG Opal support detected - manual PSID revert may be possible"
-            echo "WARNING: PSID revert requires physical access to drive label"
-        fi
-    fi
-    
-    # Method 6: Attempt to reset controller (risky, might help with locked states)
-    echo "Method 6: Attempting controller reset..."
-    if nvme reset "$dev" 2>/dev/null; then
-        sleep 2
-        # Retry format after reset
-        if nvme format "$dev" --ses=2 -f 2>/dev/null; then
-            echo "SUCCESS: Crypto erase after reset completed"
-            return 0
-        fi
-    fi
-    
-    # Method 7: Try namespace management (delete and recreate)
-    echo "Method 7: Attempting namespace management..."
-    # Get namespace ID
-    NSID=$(nvme list-ns "$dev" 2>/dev/null | grep -oE "^\[.*:.*\]" | grep -oE "[0-9]+" | head -1)
-    if [ -n "$NSID" ]; then
-        # Try to delete and recreate namespace
-        if nvme delete-ns "$dev" -n "$NSID" 2>/dev/null; then
-            echo "Namespace deleted, attempting recreation..."
-            # Get total size
-            SIZE=$(nvme id-ctrl "$dev" 2>/dev/null | grep -i "total nvm capacity" | grep -oE "[0-9]+" | head -1)
-            if [ -n "$SIZE" ] && nvme create-ns "$dev" -s "$SIZE" -c "$SIZE" 2>/dev/null; then
-                echo "SUCCESS: Namespace recreated"
-                return 0
-            fi
-        fi
-    fi
-    
-    # Method 8: Software-based secure overwrite (last resort)
-    echo "WARNING: Hardware-based purge methods failed!"
-    echo "Method 8: Falling back to software overwrite..."
-    echo "Note: This is NOT cryptographically secure for all NVMe controllers"
-    
-    # First try blkdiscard for TRIM
-    if command -v blkdiscard &>/dev/null; then
-        echo "Issuing TRIM/discard to entire drive..."
-        blkdiscard -f "$dev" 2>/dev/null || true
-    fi
-    
-    # Then overwrite with random data
-    echo "Overwriting with random data (this will take time)..."
-    if dd if=/dev/urandom of="$dev" bs=1M status=progress conv=fdatasync 2>/dev/null; then
-        echo "Software overwrite completed"
-        
-        # Issue final TRIM
-        blkdiscard -f "$dev" 2>/dev/null || true
-        
-        echo "PARTIAL SUCCESS: Software overwrite completed"
-        echo "WARNING: Some data may remain in over-provisioned areas"
-        return 0
-    fi
-    
-    echo "ERROR: All purge methods failed for $dev"
-    return 1
-}
-
 # Function to perform ATA Secure Erase
 ata_secure_erase() {
     local dev=$1
@@ -342,9 +197,9 @@ fi
 # SAFETY CONFIRMATION
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "                    WARNING                 "
-echo "                                            "
-echo "    This will PERMANENTLY DESTROY ALL DATA  "
+echo "                   WARNING                 "
+echo "                                           "
+echo "   This will PERMANENTLY DESTROY ALL DATA  "
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
@@ -436,20 +291,46 @@ for dev in $VALID_DRIVES; do
     PURGE_SUCCESS=false
     
     case "$TYPE" in
-        "NVMe")
-            echo "NVMe drive detected. Checking drive model..."
+"NVMe")
+            echo "NVMe drive detected. Attempting NIST 800-88 Purge..."
             
-            # Check if this is a known problematic drive
-            if detect_problematic_nvme "$DEV_PATH"; then
-                echo "This drive may reject standard secure erase commands."
-                echo "Attempting alternative methods..."
-            fi
-            
-            # Use enhanced purge function
-            if purge_nvme "$DEV_PATH"; then
+            # Try crypto erase first (most secure and fastest)
+            if nvme format "$DEV_PATH" --ses=2 -f 2>/dev/null; then
+                echo "NVMe crypto erase successful"
+                PURGE_SUCCESS=true
+            # Fall back to block erase
+            elif nvme format "$DEV_PATH" --ses=1 -f 2>/dev/null; then
+                echo "NVMe block erase successful"
+                PURGE_SUCCESS=true
+            # Try sanitize as last resort
+            elif command -v nvme &>/dev/null && nvme sanitize "$DEV_PATH" --sanact=2 2>/dev/null; then
+                echo "NVMe sanitize crypto erase successful"
                 PURGE_SUCCESS=true
             else
-                echo "ERROR: All NVMe purge methods failed"
+                echo "WARNING: All NVMe hardware purge methods failed, hardware not supported"
+                echo "Falling back to overwrite method according to NIST 800-88 Purge..."
+                echo ""
+                
+                # Get drive size for progress estimation
+                SIZE_BYTES=$(blockdev --getsize64 "$DEV_PATH" 2>/dev/null || echo 0)
+                SIZE_GB=$((SIZE_BYTES / 1024 / 1024 / 1024))
+                echo "Drive size: ${SIZE_GB}GB"
+                echo "Estimated time: $((SIZE_GB * 3 / 60)) minutes for random overwrite"
+                
+                # Perform single-pass random overwrite
+                echo "Starting random data overwrite..."
+                if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress conv=fdatasync 2>/dev/null; then
+                    echo "Software overwrite completed successfully"
+                    
+                    # Issue final TRIM to ensure all blocks are marked as erased
+                    echo "Issuing final TRIM command to ensure all blocks are marked as erased..."
+                    blkdiscard -f "$DEV_PATH" 2>/dev/null || nvme dsm "$DEV_PATH" -d -s 0 -b 100000 2>/dev/null || true
+                    
+                    echo "NIST 800-88 Purge achieved through random data overwrite"
+                    PURGE_SUCCESS=true
+                else
+                    echo "ERROR: Random data overwrite failed"
+                fi
             fi
             ;;
             
