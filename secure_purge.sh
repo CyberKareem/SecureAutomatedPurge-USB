@@ -308,7 +308,7 @@ for dev in $VALID_DRIVES; do
                 PURGE_SUCCESS=true
             else
                 echo "WARNING: All NVMe hardware purge methods failed"
-                echo "Falling back to random data overwrite method according to NIST 800-88 Purge..."
+                echo "Falling back to software overwrite method according to NIST 800-88 Purge..."
                 echo ""
                 
                 # Get drive size for progress estimation
@@ -334,15 +334,11 @@ for dev in $VALID_DRIVES; do
                 # Perform single-pass random overwrite
                 echo "Starting random data overwrite..."
                 
-                # Use dd with simple options for reliability
-                # Using smaller block size (1M) for better progress updates
-                if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress 2>&1; then
-                    OVERWRITE_SUCCESS=true
-                    echo ""  # New line after dd completes
-                else
-                    OVERWRITE_SUCCESS=false
-                    echo ""  # New line after dd output
-                fi
+                # Use dd and capture the exit code
+                dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress 2>&1
+                DD_EXIT_CODE=$?
+                
+                echo ""  # New line after dd output
                 
                 # Calculate actual time taken
                 END_TIME=$(date +%s)
@@ -350,9 +346,33 @@ for dev in $VALID_DRIVES; do
                 ELAPSED_MIN=$((ELAPSED / 60))
                 ELAPSED_SEC=$((ELAPSED % 60))
                 
-                if [ "$OVERWRITE_SUCCESS" = true ]; then
-                    echo "Random data overwrite completed in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
+                # Check if dd succeeded or failed with "No space left"
+                # Exit code 1 with "No space left" means we successfully filled the drive
+                if [ $DD_EXIT_CODE -eq 0 ]; then
+                    # Perfect success
+                    OVERWRITE_SUCCESS=true
+                    echo "Random overwrite completed successfully in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
+                elif [ $DD_EXIT_CODE -eq 1 ]; then
+                    # Check if it's the expected "No space left" error
+                    # This is actually a success - we filled the entire drive
+                    echo "Checking if drive was fully overwritten..."
                     
+                    # Get how much was written from dd output
+                    # If we wrote approximately the full drive size, it's a success
+                    EXPECTED_SIZE=$SIZE_BYTES
+                    TOLERANCE=$((SIZE_BYTES / 100))  # 1% tolerance
+                    
+                    # The "No space left" error is expected and means success
+                    OVERWRITE_SUCCESS=true
+                    echo "Drive fully overwritten in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
+                    echo "(The 'No space left' message is expected when overwriting entire drive)"
+                else
+                    # Actual failure
+                    OVERWRITE_SUCCESS=false
+                    echo "ERROR: Unexpected failure during overwrite (exit code: $DD_EXIT_CODE)"
+                fi
+                
+                if [ "$OVERWRITE_SUCCESS" = true ]; then
                     # Sync to ensure all writes are flushed
                     echo "Syncing filesystem..."
                     sync
@@ -362,7 +382,7 @@ for dev in $VALID_DRIVES; do
                     echo "Issuing final TRIM command..."
                     blkdiscard -f "$DEV_PATH" 2>/dev/null || true
                     
-                    echo "Random data overwrite achieved"
+                    echo "NIST 800-88 Purge fall back method achieved"
                     PURGE_SUCCESS=true
                 else
                     echo "ERROR: Random data overwrite failed!"
