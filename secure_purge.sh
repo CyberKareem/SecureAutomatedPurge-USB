@@ -307,29 +307,84 @@ for dev in $VALID_DRIVES; do
                 echo "NVMe sanitize crypto erase successful"
                 PURGE_SUCCESS=true
             else
-                echo "WARNING: All NVMe hardware purge methods failed, hardware not supported"
-                echo "Falling back to overwrite method according to NIST 800-88 Purge..."
+                echo "WARNING: All NVMe hardware purge methods failed"
+                echo "This is common on certain systems (T480s) or drives (Samsung MZVL*)"
+                echo "Falling back to software overwrite method..."
+                echo ""
+                echo "NOTE: Software overwrite achieves NIST 800-88 CLEAR level (not PURGE)"
+                echo "For PURGE level on blocked drives, physical destruction is required"
                 echo ""
                 
                 # Get drive size for progress estimation
                 SIZE_BYTES=$(blockdev --getsize64 "$DEV_PATH" 2>/dev/null || echo 0)
                 SIZE_GB=$((SIZE_BYTES / 1024 / 1024 / 1024))
+                
                 echo "Drive size: ${SIZE_GB}GB"
-                echo "Estimated time: $((SIZE_GB * 3 / 60)) minutes for random overwrite"
+                
+                # Random data is slower than zeros
+                # Typical speeds: 100-200 MB/s for /dev/urandom
+                # Conservative estimate: 100 MB/s = 10 seconds per GB
+                TIME_MIN=$((SIZE_GB * 10 / 60))
+                if [ $TIME_MIN -eq 0 ]; then TIME_MIN=1; fi
+                TIME_MAX=$((SIZE_GB * 15 / 60))
+                if [ $TIME_MAX -eq 0 ]; then TIME_MAX=2; fi
+                
+                echo "Performing one random data pass..."
+                echo "Estimated time: ${TIME_MIN}-${TIME_MAX} minutes"
+                echo ""
+                echo "NOTE: The cursor may appear frozen. This is normal!"
+                echo "      Progress updates will appear periodically."
+                echo ""
+                
+                # Start time for actual measurement
+                START_TIME=$(date +%s)
                 
                 # Perform single-pass random overwrite
                 echo "Starting random data overwrite..."
-                if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress conv=fdatasync 2>/dev/null; then
-                    echo "Software overwrite completed successfully"
+                
+                # Use dd with simple options for reliability
+                # Using smaller block size (1M) for better progress updates
+                if dd if=/dev/urandom of="$DEV_PATH" bs=1M status=progress 2>&1; then
+                    OVERWRITE_SUCCESS=true
+                    echo ""  # New line after dd completes
+                else
+                    OVERWRITE_SUCCESS=false
+                    echo ""  # New line after dd output
+                fi
+                
+                # Calculate actual time taken
+                END_TIME=$(date +%s)
+                ELAPSED=$((END_TIME - START_TIME))
+                ELAPSED_MIN=$((ELAPSED / 60))
+                ELAPSED_SEC=$((ELAPSED % 60))
+                
+                if [ "$OVERWRITE_SUCCESS" = true ]; then
+                    echo "Random overwrite completed in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
+                    
+                    # Sync to ensure all writes are flushed
+                    echo "Syncing filesystem..."
+                    sync
+                    sync
                     
                     # Issue final TRIM to ensure all blocks are marked as erased
-                    echo "Issuing final TRIM command to ensure all blocks are marked as erased..."
-                    blkdiscard -f "$DEV_PATH" 2>/dev/null || nvme dsm "$DEV_PATH" -d -s 0 -b 100000 2>/dev/null || true
+                    echo "Issuing final TRIM command..."
+                    blkdiscard -f "$DEV_PATH" 2>/dev/null || true
                     
-                    echo "NIST 800-88 Purge achieved through random data overwrite"
+                    echo "NIST 800-88 CLEAR level achieved (software overwrite)"
                     PURGE_SUCCESS=true
                 else
-                    echo "ERROR: Random data overwrite failed"
+                    echo "ERROR: Random data overwrite failed!"
+                    echo "Possible causes:"
+                    echo "- Drive is write-protected"
+                    echo "- Drive is failing"
+                    echo "- Process was interrupted"
+                    
+                    # Try to get more info about the failure
+                    echo ""
+                    echo "Drive status:"
+                    nvme smart-log "$DEV_PATH" 2>/dev/null | grep -E "critical_warning|available_spare|percentage_used" || true
+                    
+                    PURGE_SUCCESS=false
                 fi
             fi
             ;;
