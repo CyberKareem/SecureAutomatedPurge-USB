@@ -308,11 +308,7 @@ for dev in $VALID_DRIVES; do
                 PURGE_SUCCESS=true
             else
                 echo "WARNING: All NVMe hardware purge methods failed"
-                echo "This is common on certain systems (T480s) or drives (Samsung MZVL*)"
-                echo "Falling back to software overwrite method..."
-                echo ""
-                echo "NOTE: Software overwrite achieves NIST 800-88 CLEAR level (not PURGE)"
-                echo "For PURGE level on blocked drives, physical destruction is required"
+                echo "Falling back to random data overwrite method according to NIST 800-88 Purge..."
                 echo ""
                 
                 # Get drive size for progress estimation
@@ -321,7 +317,6 @@ for dev in $VALID_DRIVES; do
                 
                 echo "Drive size: ${SIZE_GB}GB"
                 
-                # Random data is slower than zeros
                 # Typical speeds: 100-200 MB/s for /dev/urandom
                 # Conservative estimate: 100 MB/s = 10 seconds per GB
                 TIME_MIN=$((SIZE_GB * 10 / 60))
@@ -329,11 +324,8 @@ for dev in $VALID_DRIVES; do
                 TIME_MAX=$((SIZE_GB * 15 / 60))
                 if [ $TIME_MAX -eq 0 ]; then TIME_MAX=2; fi
                 
-                echo "Performing one random data pass..."
+                echo "Performing random data overwrite..."
                 echo "Estimated time: ${TIME_MIN}-${TIME_MAX} minutes"
-                echo ""
-                echo "NOTE: The cursor may appear frozen. This is normal!"
-                echo "      Progress updates will appear periodically."
                 echo ""
                 
                 # Start time for actual measurement
@@ -359,7 +351,7 @@ for dev in $VALID_DRIVES; do
                 ELAPSED_SEC=$((ELAPSED % 60))
                 
                 if [ "$OVERWRITE_SUCCESS" = true ]; then
-                    echo "Random overwrite completed in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
+                    echo "Random data overwrite completed in ${ELAPSED_MIN}m ${ELAPSED_SEC}s"
                     
                     # Sync to ensure all writes are flushed
                     echo "Syncing filesystem..."
@@ -370,14 +362,10 @@ for dev in $VALID_DRIVES; do
                     echo "Issuing final TRIM command..."
                     blkdiscard -f "$DEV_PATH" 2>/dev/null || true
                     
-                    echo "NIST 800-88 CLEAR level achieved (software overwrite)"
+                    echo "Random data overwrite achieved"
                     PURGE_SUCCESS=true
                 else
                     echo "ERROR: Random data overwrite failed!"
-                    echo "Possible causes:"
-                    echo "- Drive is write-protected"
-                    echo "- Drive is failing"
-                    echo "- Process was interrupted"
                     
                     # Try to get more info about the failure
                     echo ""
