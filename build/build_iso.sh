@@ -110,21 +110,14 @@ cat > config/package-lists/purge.list.chroot << EOF
 nvme-cli
 hdparm
 smartmontools
-util-linux
 pv
-dc3dd
-bsdextrautils
-secure-delete
-nwipe
 gdisk
 parted
-coreutils
-dosfstools
-e2fsprogs
 dmidecode
 cryptsetup
 usbutils
 pciutils
+xxd
 EOF
 
 # Configure repositories
