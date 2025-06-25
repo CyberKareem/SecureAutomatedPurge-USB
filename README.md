@@ -1,4 +1,4 @@
-# 🔥 Secure Automated Purge USB Utility
+# Secure Automated Purge USB Utility
 
 **Boot. Confirm. Purge. Done.**
 
@@ -12,30 +12,30 @@
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey)
 ![NIST Compliant](https://img.shields.io/badge/NIST%20800--88-Compliant-green)
 
-## ⚡ Download
+## Download
 
 **[Download Latest ISO (v1.0.0)](https://github.com/CyberKareem/SecureAutomatedPurge-USB/releases/latest)** | **[All Releases](https://github.com/CyberKareem/SecureAutomatedPurge-USB/releases)**
 
 ### Verify Your Download
 ```bash
 # SHA256 checksum verification (update with your actual checksum)
-echo "1D7A7455FC410F7675A54242D1A41F5694824EC50AC9BF94240E687119E632A4  live-image-amd64.hybrid.iso" | sha256sum -c
+echo "b6a2c4af987ce57f8bea213315071145084e2e890e68058614bba936a92bb9c5  SecureAutomatedPurge-v1.0.0.iso" | sha256sum -c
 ```
 
 ---
 
-## ⚠️ WARNING
+## WARNING
 
 **This utility will PERMANENTLY DESTROY ALL DATA on ALL internal drives!**
 
-- 🚫 **No recovery possible**
-- 🚫 **No undo function**
-- ✅ **USB drives excluded** (safety feature)
-- ✅ **Requires explicit confirmation**
+- **No recovery possible**
+- **No undo function**
+- **USB drives excluded** (safety feature)
+- **Requires explicit confirmation**
 
 ---
 
-## 🎯 Purpose
+## Purpose
 
 The **Secure Automated Purge USB Utility** is a bootable Linux ISO that performs **NIST SP 800-88 Rev. 1 compliant** data sanitization on internal drives. It automatically:
 
@@ -46,32 +46,32 @@ The **Secure Automated Purge USB Utility** is a bootable Linux ISO that performs
 5. Shuts down upon completion
 
 Perfect for:
-- 🏢 IT departments decommissioning equipment
-- ♻️ Electronics recycling centers
-- 🔒 Security-conscious organizations
-- 🏠 Personal use before selling/donating computers
+- IT departments decommissioning equipment
+- Electronics recycling centers
+- Security-conscious organizations
+- Personal use before selling/donating computers
 
 ---
 
-## ✨ Features
+## Features
 
-### 🤖 Fully Automated
+### Fully Automated
 - Boot from USB and follow prompts
 - No technical knowledge required
 - Automatic drive detection and method selection
 
-### 🛡️ Security Features
+### Security Features
 - **NIST 800-88 Compliant**: Meets federal standards for data sanitization
 - **Multi-method support**: NVMe crypto erase, ATA Secure Erase, 3-pass overwrite
 - **Verification**: Post-purge sampling confirms data destruction
 - **Audit trail**: Detailed logs for compliance documentation
 
-### 🔧 Technical Capabilities
+### Technical Capabilities
 - **NVMe drives**: Format with crypto erase (`--ses=2`) or block erase (`--ses=1`)
 - **SATA SSDs**: ATA Secure Erase with password protection
 - **HDDs**: NIST-compliant 3-pass overwrite with `shred`
 
-### 🚀 Safety Measures
+### Safety Measures
 - USB drives automatically excluded
 - Requires typing `ERASE ALL DATA` to proceed
 - Shows detailed drive information before purge
@@ -79,7 +79,7 @@ Perfect for:
 
 ---
 
-## 📋 Usage Instructions
+## Usage Instructions
 
 ### Creating Bootable USB
 
@@ -134,7 +134,7 @@ Enter confirmation: _
 
 ---
 
-## 🔬 Technical Details
+## Technical Details
 
 ### Supported Drive Types
 
@@ -179,7 +179,7 @@ Expected result: all zeros or random data (no readable filesystem)
 
 ---
 
-## 🏗️ Building from Source
+## Building from Source
 
 Don't trust pre-built ISOs? Build your own:
 
@@ -204,14 +204,14 @@ cd build
 
 ---
 
-## 📊 NIST SP 800-88 Compliance
+## NIST SP 800-88 Compliance
 
 This utility implements **Purge-level** sanitization as defined in [NIST Special Publication 800-88 Revision 1](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-88r1.pdf):
 
-- ✅ **Cryptographic Erase** for self-encrypting drives (Section 3.5)
-- ✅ **Block Erase** for flash memory (Appendix A.11)
-- ✅ **Overwrite** for magnetic media (Appendix A.8)
-- ✅ **Verification** procedures (Section 4.8)
+- **Cryptographic Erase** for self-encrypting drives (Section 3.5)
+- **Block Erase** for flash memory (Appendix A.11)
+- **Overwrite** for magnetic media (Appendix A.8)
+- **Verification** procedures (Section 4.8)
 
 ### Compliance Matrix
 
@@ -224,27 +224,27 @@ This utility implements **Purge-level** sanitization as defined in [NIST Special
 
 ---
 
-## 🔗 Related Projects
+## Related Projects
 
 - [BitLocker Cryptographic Erase](https://github.com/CyberKareem/BitLocker-CryptoErase) - Windows-based crypto erase utility
 
 ---
 
-## 📜 License
+## License
 
 This project is licensed under the [MIT License](./LICENSE) - see the file for details.
 
 ---
 
-## 🛡️ Security Policy
+## Security Policy
 
 Found a security issue? Please report it responsibly:
-- 📧 Email: abdullahalikareem@gmail.com
-- 🔐 GPG Key: [Available on request]
+- Email: abdullahalikareem@gmail.com
+- GPG Key: [Available on request]
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions welcome! Please:
 - Fork the repository
@@ -255,7 +255,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
 ---
 
-## 📧 Contact & Support
+## Contact & Support
 
 - **Author**: Abdullah Kareem
 - **X**: [DM me on X](https://x.com/CyberKareem)
@@ -265,7 +265,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - NIST for SP 800-88 guidelines
 - Debian team for live-build framework
