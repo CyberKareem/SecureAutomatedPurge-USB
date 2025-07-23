@@ -215,12 +215,12 @@ done
 echo ""
 echo "This action CANNOT be undone!"
 echo ""
-echo "To proceed, type: ERASE ALL DATA"
+echo "To proceed, type: purge"
 echo -n "Enter confirmation: "
 
 read user_input
 
-if [ "$user_input" != "ERASE ALL DATA" ]; then
+if [ "$user_input" != "purge" ]; then
     echo ""
     echo "Incorrect confirmation. Purge aborted."
     echo "System will shut down in 5 seconds."
